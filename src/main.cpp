@@ -73,8 +73,12 @@ static void usage() {
         "LLVM modes (need -DBB_RECOMP_LLVM=ON):\n"
         "  --emit-ll <hex vaddr|all> <file>   LLVM IR text (one function, or --limit N / all functions)\n"
         "  --obj <file>         compile to object files (<file> for 1 shard, else <base>.NNN.o + <base>.table.o)\n"
-        "  --so <file>          compile and link a shared object: Android ARM64 (NDK ld.lld) or, with --target x86_64, a PC one (clang + lld)\n"
-        "  --target aarch64|x86_64   (default aarch64)     -O0 | -O1 (default) | -O2\n"
+        "  --so <file>          shared object: Android ARM64 (NDK) or PC x86_64 (clang + lld)\n"
+        "  --horizon-elf <file> Horizon AArch64 ET_REL bundle; requires a separate runtime/loader\n"
+        "  --target aarch64|aarch64-none-elf|x86_64 (default aarch64)   -O0 | -O1 (default) | -O2\n"
+        "  --horizon-clang <path>  clang for Horizon helper objects (default clang)\n"
+        "  --horizon-lld <path>    ld.lld for combining Horizon ELF objects (default ld.lld)\n"
+        "  --horizon-sysroot <dir> optional target sysroot for libc math headers\n"
         "  --shards <n>         modules compiled in parallel (default 64 or more: the memory plan makes the shards smaller, then the\n"
         "                       worker count lower, until the peak fits in 60% of the available RAM; 1 for --emit-ll)\n"
         "  --plan-only          print the memory plan (jobs, shards, estimated peak) and stop\n"
@@ -223,7 +227,17 @@ static int recompRun(int argc, char** argv) {
     else if (is("--emit-ll")) { std::string a = arg(); cc.llPath = arg(); if (a == "all") cc.onlyVaddr = -1; else cc.onlyVaddr = strtoll(a.c_str(), nullptr, 16); }
     else if (is("--obj")) cc.objPath = arg();
     else if (is("--so")) cc.soPath = arg();
-    else if (is("--target")) { std::string t = arg(); if (t == "aarch64") cc.target.aarch64 = true; else if (t == "x86_64") cc.target.aarch64 = false; else usageExit(); }
+    else if (is("--horizon-elf")) { cc.horizonPath = arg(); cc.target.aarch64 = true; cc.target.horizon = true; }
+    else if (is("--horizon-clang")) cc.horizonClang = arg();
+    else if (is("--horizon-lld")) cc.horizonLld = arg();
+    else if (is("--horizon-sysroot")) cc.horizonSysroot = arg();
+    else if (is("--target")) {
+      std::string t = arg();
+      if (t == "aarch64") { cc.target.aarch64 = true; cc.target.horizon = false; }
+      else if (t == "aarch64-none-elf" || t == "aarch64-horizon") { cc.target.aarch64 = true; cc.target.horizon = true; }
+      else if (t == "x86_64") { cc.target.aarch64 = false; cc.target.horizon = false; }
+      else usageExit();
+    }
     else if (is("-O0")) cc.target.opt = 0;
     else if (is("-O1")) cc.target.opt = 1;
     else if (is("-O2")) cc.target.opt = 2;
@@ -285,9 +299,15 @@ static int recompRun(int argc, char** argv) {
   }
 #ifdef BB_RECOMP_LLVM
   const bool writesSo = !cc.soPath.empty();
+  const bool writesHorizonElf = !cc.horizonPath.empty();
 #else
   const bool writesSo = false;
+  const bool writesHorizonElf = false;
 #endif
+  if (writesSo && writesHorizonElf) { bbrError("choose either --so or --horizon-elf, not both"); return 2; }
+  if (writesHorizonElf && !cc.target.horizon) { bbrError("--horizon-elf requires --target aarch64-none-elf"); return 2; }
+  if (cc.target.horizon && writesSo) { bbrError("Horizon output is relocatable ELF, not an Android/PC shared object; use --horizon-elf"); return 2; }
+  if (cc.target.horizon && !jsonFile.empty()) { bbrError("--json is Android player metadata and is not valid for Horizon ELF"); return 2; }
   if (!gameDir.empty() && !writesSo && !jsonFile.empty()) { bbrError("--json needs --so (the json describes the .so)"); return 2; }
   if (!gameDir.empty() && bootFile.empty() && writesSo) { bbrError("--game-dir writes libbbaot.json for a --boot image: give --boot too"); return 2; }
 #ifndef BB_RECOMP_PLAYER
@@ -372,9 +392,9 @@ static int recompRun(int argc, char** argv) {
   if (scanOnly) return 0;
   if (dump) return dumpFunction(img, funcs, strtoull(dumpArg.c_str(), nullptr, 16), co.lift);
 #ifdef BB_RECOMP_LLVM
-  if (!cc.llPath.empty() || !cc.objPath.empty() || !cc.soPath.empty() || cc.planOnly || cc.unitsOnly || !cc.unitsDump.empty() || !cc.checkEntries.empty()) {
+  if (!cc.llPath.empty() || !cc.objPath.empty() || !cc.soPath.empty() || !cc.horizonPath.empty() || cc.planOnly || cc.unitsOnly || !cc.unitsDump.empty() || !cc.checkEntries.empty()) {
     cc.lift = co.lift; cc.jobs = co.jobs; cc.limit = co.limit; cc.every = co.every; cc.jobsFixed = jobsSet; cc.shardsFixed = shardsSet;
-    if (!shardsSet && !cc.llPath.empty() && cc.objPath.empty() && cc.soPath.empty()) cc.shards = 1;
+    if (!shardsSet && !cc.llPath.empty() && cc.objPath.empty() && cc.soPath.empty() && cc.horizonPath.empty()) cc.shards = 1;
     cc.resume = resume;
     int rc = runCompile(img, funcs, cc);
 #ifdef BB_RECOMP_PLAYER

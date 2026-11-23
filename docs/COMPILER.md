@@ -115,6 +115,9 @@ Compile resources: `--plan-only` prints the plan; the shard and worker counts fo
     bb-recomp --elf out/eboot.elf --obj out/obj/game.o --shards 64 -O1       # everything: game.000.o ... game.063.o + game.table.o
     bb-recomp --elf out/eboot.elf --so out/so/libbbaot.so -O1                # compile and link with the NDK's ld.lld
     bb-recomp ... --target x86_64                                            # same code for the PC (the test runner uses this)
+    bb-recomp --elf out/eboot.elf --target aarch64-none-elf --horizon-elf out/horizon.o  # experimental bare-metal ET_REL; not executable yet
+
+The experimental `aarch64-none-elf` output is a relocatable AArch64 object bundle for future Horizon loader work, not a shared object or NRO. See [`HORIZON_AOT_EXPERIMENT.md`](HORIZON_AOT_EXPERIMENT.md) for its ABI and validation limits.
 
 `--shards N` (default 64; 1 for `--emit-ll`) splits the functions into N modules of equal code size, compiled on up to 22
 threads at nice 19. The pass pipeline has no interprocedural passes (SROA/mem2reg, EarlyCSE, InstCombine, SimplifyCFG, DSE;
@@ -147,7 +150,7 @@ Ops with no sensible inline form call `bbr_x87_*` functions: the 80-bit memory c
 `F80CVTTo`), the integer and BCD conversions, and the F64 transcendental and remainder ops (`F64FPREM/FPREM1/SCALE/F2XM1/FYL2X/FYL2XP1/ATAN/TAN/SIN/COS`).
 They are FEX's own fallback handlers (`F80Fallbacks.h`, MIT) over the SoftFloat 3e that FEX bundles (BSD-3; a subset is copied to
 `helpers/softfloat`, see `helpers/NOTICE`), as plain C. `bb-recomp` compiles `helpers/bbr_x87_all.c` for the target with that target's own clang
-(`--ndk` clang with `--target=aarch64-linux-android30`; the system clang for `--target x86_64`), writes it as `<out>.helpers.o`, and
+(`--ndk` clang with `--target=aarch64-linux-android30`; `--horizon-clang` with `--target=aarch64-none-elf` for Horizon; system clang for `--target x86_64`), writes it as `<out>.helpers.o`, and
 links it into the `.so` (with libm as `DT_NEEDED`, `--helpers-dir` to use other sources). The runtime provides nothing for them
 (docs/RECOMP_ABI.md, "x87 helpers"). The test tools link the same file and register the symbols with the in-process JIT.
 `helpers/test/test_x87.c` checks the conversions against the host's x87 unit (6.4 M random and edge-case values, 4 rounding modes): 0 mismatches

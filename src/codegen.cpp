@@ -40,7 +40,10 @@ void initLlvmTargets() {
   });
 }
 
-static Triple tripleOf(const TargetSpec& t) { return Triple(t.aarch64 ? "aarch64-unknown-linux-android30" : "x86_64-unknown-linux-gnu"); }
+static Triple tripleOf(const TargetSpec& t) {
+  if (!t.aarch64) return Triple("x86_64-unknown-linux-gnu");
+  return Triple(t.horizon ? "aarch64-none-elf" : "aarch64-unknown-linux-android30");
+}
 
 std::unique_ptr<TargetMachine> makeTargetMachine(const TargetSpec& t, bool jit) {
   initLlvmTargets();
@@ -51,7 +54,8 @@ std::unique_ptr<TargetMachine> makeTargetMachine(const TargetSpec& t, bool jit) 
   std::string cpu = t.cpu, feat = t.features;
   if (t.aarch64) {
     if (cpu.empty()) cpu = "generic";
-    if (feat.empty()) feat = "+v8.2a,+lse,+crc,+fp-armv8,+neon";
+    // Switch 1's Cortex-A57 is ARMv8-A; do not emit Android's ARMv8.2/LSE assumptions.
+    if (feat.empty()) feat = t.horizon ? "+v8a,+fp-armv8,+neon" : "+v8.2a,+lse,+crc,+fp-armv8,+neon";
   } else {
     if (cpu.empty()) cpu = sys::getHostCPUName().str();
     if (feat.empty()) {

@@ -9,8 +9,9 @@ namespace llvm { class Module; class TargetMachine; class raw_pwrite_stream; }
 
 struct TargetSpec {
   bool aarch64 = true;           // false: x86-64 host (ASM test runner, PC-side checks)
+  bool horizon = false;          // AArch64 ELF for Horizon OS; distinct from Android/bionic
   int opt = 1;                   // 0, 1 or 2
-  std::string cpu, features;     // empty: defaults (aarch64: generic + v8.2a + LSE; x86-64: the host's)
+  std::string cpu, features;     // empty: Android AArch64 v8.2/LSE, Horizon AArch64 v8-A baseline, or host x86-64 defaults
 };
 
 void initLlvmTargets();

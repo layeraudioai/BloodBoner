@@ -599,7 +599,7 @@ int runCompile(const ElfImage& img, const std::vector<Func>& funcs, const Compil
   }
   uint64_t totalBytes = 0;
   for (size_t i : todo) totalBytes += funcs[i].end - funcs[i].start;
-  const bool wantCode0 = !opt.objPath.empty() || !opt.soPath.empty();
+  const bool wantCode0 = !opt.objPath.empty() || !opt.codePath().empty();
   MemPlan plan {std::max(1u, opt.jobs), std::max(1u, opt.shards)};
   if (wantCode0 || !opt.llPath.empty() || opt.planOnly) plan = planMemory(opt, totalBytes / 1e6, todo.size());
   if (opt.planOnly) {
@@ -696,7 +696,7 @@ int runCompile(const ElfImage& img, const std::vector<Func>& funcs, const Compil
     if (rc) return rc;
   }
   if (opt.unitsOnly) return 0;
-  const bool wantCode = !opt.objPath.empty() || !opt.soPath.empty();
+  const bool wantCode = !opt.objPath.empty() || !opt.codePath().empty();
   const bool emitLl = !opt.llPath.empty();
   (void)wantCode0;
   LowerOptions lo;
@@ -730,7 +730,7 @@ int runCompile(const ElfImage& img, const std::vector<Func>& funcs, const Compil
   if (opt.resume && wantCode) {
     KeyHash& h = globalKey;
     h.str(BBR_COMPILER_VERSION); h.u64(img.base); h.u64(imageHash); h.u64(img.file.size());
-    h.u64(opt.target.aarch64); h.u64(opt.target.opt); h.str(opt.target.cpu); h.str(opt.target.features);
+    h.u64(opt.target.aarch64); h.u64(opt.target.horizon); h.u64(opt.target.opt); h.str(opt.target.cpu); h.str(opt.target.features);
     h.u64(opt.storeFlagsAtCalls | opt.calleeSaved << 1 | opt.dirtyCheck << 2 | opt.resumeEntries << 3); h.u64((uint64_t)opt.granular);
     h.u64(liftOpt.multiblock | liftOpt.tso << 1 | liftOpt.gapUnits << 2 | liftOpt.switchTables << 3 | liftOpt.passes << 4 | liftOpt.validate << 5 | liftOpt.granularAll << 6); h.str(liftOpt.host); h.u64(liftOpt.maxInst);
     h.u64(starts.size()); for (uint64_t v : starts) h.u64(v);
@@ -801,7 +801,7 @@ int runCompile(const ElfImage& img, const std::vector<Func>& funcs, const Compil
       for (;;) {
         const unsigned k = nk++;
         if (k >= nshards) break;
-        const std::string path = shardPath(opt.objPath.empty() ? opt.soPath + ".o" : opt.objPath, nshards, k, ".o");
+        const std::string path = shardPath(opt.objPath.empty() ? opt.codePath() + ".o" : opt.objPath, nshards, k, ".o");
         const bool known = haveManifest && man.shards[k].key == keys[k];
         ShardStats tmp;
         if (!loadShard(path, keys[k], tmp)) continue;
@@ -822,7 +822,7 @@ int runCompile(const ElfImage& img, const std::vector<Func>& funcs, const Compil
     std::vector<WorkerThread> th;
     for (unsigned i = 0; i < std::max(1u, std::min<unsigned>(plan.jobs, nshards)); ++i) th.emplace_back(check);
     for (auto& t : th) t.join();
-    for (unsigned k = 0; k < nshards; ++k) if (keep[k]) { objFiles[k] = shardPath(opt.objPath.empty() ? opt.soPath + ".o" : opt.objPath, nshards, k, ".o"); ++reusedN; }
+    for (unsigned k = 0; k < nshards; ++k) if (keep[k]) { objFiles[k] = shardPath(opt.objPath.empty() ? opt.codePath() + ".o" : opt.objPath, nshards, k, ".o"); ++reusedN; }
     if (haveManifest) for (unsigned k = 0; k < nshards; ++k) manifestKnows[k] = man.shards[k].key == keys[k];
   }
   for (auto& n : manifestNotes) say("manifest: %s\n", n.c_str());
@@ -854,7 +854,7 @@ int runCompile(const ElfImage& img, const std::vector<Func>& funcs, const Compil
       if (keep[k]) continue;
       bbrProgress(k, nshards);
       ShardStats& st = stats[k];
-      const std::string path = wantCode ? shardPath(opt.objPath.empty() ? opt.soPath + ".o" : opt.objPath, nshards, k, ".o") : std::string();
+      const std::string path = wantCode ? shardPath(opt.objPath.empty() ? opt.codePath() + ".o" : opt.objPath, nshards, k, ".o") : std::string();
       const std::string& key = keys[k];
       if (opt.resume && wantCode) {
         st = ShardStats();
@@ -961,7 +961,7 @@ int runCompile(const ElfImage& img, const std::vector<Func>& funcs, const Compil
     VariantJob vj;
     vj.img = &img; vj.starts = &starts; vj.catalog = &catalog; vj.lift = liftOpt; vj.lower = lo; vj.target = opt.target;
     vj.jobs = jobs; vj.verify = opt.verify;
-    vj.objBase = opt.objPath.empty() ? opt.soPath : opt.objPath;
+    vj.objBase = opt.objPath.empty() ? opt.codePath() : opt.objPath;
     { const size_t d = vj.objBase.rfind('.'); if (d != std::string::npos && d > vj.objBase.rfind('/') + 1) vj.objBase.resize(d); }
     std::vector<Func> compiledF;
     for (size_t i : todo) compiledF.push_back(funcs[i]);
@@ -988,7 +988,7 @@ int runCompile(const ElfImage& img, const std::vector<Func>& funcs, const Compil
   if (wantCode && opt.table) {
     auto t = clk::now();
     auto tm = makeTargetMachine(opt.target);
-    tablePath = (opt.objPath.empty() ? opt.soPath : opt.objPath);
+    tablePath = (opt.objPath.empty() ? opt.codePath() : opt.objPath);
     const size_t dot = tablePath.rfind('.');
     tablePath = (dot == std::string::npos ? tablePath : tablePath.substr(0, dot)) + ".table.o";
     uint64_t textEnd = 0;
@@ -1022,12 +1022,15 @@ int runCompile(const ElfImage& img, const std::vector<Func>& funcs, const Compil
   std::string helperObj;
   if (wantCode) {
     auto t = clk::now();
-    std::string base = opt.objPath.empty() ? opt.soPath : opt.objPath;
+    std::string base = opt.objPath.empty() ? opt.codePath() : opt.objPath;
     const size_t dot = base.rfind('.');
     helperObj = (dot == std::string::npos || dot < base.rfind('/') + 1 ? base : base.substr(0, dot)) + ".helpers.o";
     std::string dir = opt.helpersDir.empty() ? std::string(BBR_HELPERS_DIR) : opt.helpersDir;
     std::string cmd;
-    if (opt.target.aarch64) {
+    if (opt.target.horizon) {
+      cmd = "nice -n 19 " + opt.horizonClang + " --target=aarch64-none-elf -ffreestanding";
+      if (!opt.horizonSysroot.empty()) cmd += " --sysroot=" + opt.horizonSysroot;
+    } else if (opt.target.aarch64) {
       cmd = "nice -n 19 " + opt.ndk + "/toolchains/llvm/prebuilt/" BBR_NDK_HOST "/bin/clang --target=aarch64-linux-android30";
     } else {
       cmd = "nice -n 19 clang";
@@ -1042,13 +1045,22 @@ int runCompile(const ElfImage& img, const std::vector<Func>& funcs, const Compil
   bbrStage("link", "Linking");
   double linkTime = 0;
   uint64_t soBytes = 0;
-  if (!opt.soPath.empty()) {
+  if (!opt.codePath().empty()) {
     auto t = clk::now();
     std::string cmd;
-    if (opt.target.aarch64) {
+    if (opt.target.horizon) {
+      // Produce one relocatable AArch64 ELF object. Imports (bbr_* runtime ABI,
+      // math and compiler builtins) deliberately remain unresolved; a Horizon
+      // loader/runtime must resolve them before this can execute.
+      cmd = "nice -n 19 " + opt.horizonLld + " -r -m aarch64elf -o " + opt.codePath();
+      for (auto& o : objFiles) cmd += " " + o;
+      for (auto& o : vres.objFiles) cmd += " " + o;
+      if (!tablePath.empty()) cmd += " " + tablePath;
+      cmd += " " + helperObj;
+    } else if (opt.target.aarch64) {
       const std::string bin = opt.ndk + "/toolchains/llvm/prebuilt/" BBR_NDK_HOST;
       cmd = "nice -n 19 " + bin + "/bin/ld.lld -shared -m aarch64linux --hash-style=gnu -z noexecstack -z max-page-size=16384 -Bsymbolic --build-id=none "
-            "-soname " + opt.soPath.substr(opt.soPath.rfind('/') + 1) + " -o " + opt.soPath;
+            "-soname " + opt.codePath().substr(opt.codePath().rfind('/') + 1) + " -o " + opt.codePath();
       for (auto& o : objFiles) cmd += " " + o;
       for (auto& o : vres.objFiles) cmd += " " + o;
       if (!tablePath.empty()) cmd += " " + tablePath;
@@ -1059,7 +1071,7 @@ int runCompile(const ElfImage& img, const std::vector<Func>& funcs, const Compil
       // against the global group (the executable, LD_PRELOAD) and the library's own DT_NEEDED tree, not against the
       // executable's DT_NEEDED libraries as glibc does (dlopen failed: cannot locate symbol "bbr_dispatch"). A soname stub
       // made here gives the entry; at run time it is the libbbcpu.so already loaded.
-      const std::string stub = opt.soPath + ".libbbcpu-stub.so";
+      const std::string stub = opt.codePath() + ".libbbcpu-stub.so";
       opt.workFiles.push_back(stub);
       const std::string mk = "nice -n 19 " + bin + "/bin/clang --target=aarch64-linux-android30 -shared -nostdlib -Wl,-soname,libbbcpu.so -x c /dev/null -o " + stub;
       if (bbrSystem(opt.bundleDir, mk) != 0) { bbrError("cannot make %s", stub.c_str()); return 1; }
@@ -1067,7 +1079,7 @@ int runCompile(const ElfImage& img, const std::vector<Func>& funcs, const Compil
     } else {
       // The PC runtime (BB_AOT with an x86-64 host): the system clang links it with ld.lld and adds the builtins
       // (__divti3, __udivti3). The bbr_* helpers stay undefined here: the executable provides them.
-      cmd = "nice -n 19 clang -shared -fuse-ld=lld -Wl,-Bsymbolic -Wl,-z,noexecstack -Wl,--build-id=none -o " + opt.soPath;
+      cmd = "nice -n 19 clang -shared -fuse-ld=lld -Wl,-Bsymbolic -Wl,-z,noexecstack -Wl,--build-id=none -o " + opt.codePath();
       for (auto& o : objFiles) cmd += " " + o;
       for (auto& o : vres.objFiles) cmd += " " + o;
       if (!tablePath.empty()) cmd += " " + tablePath;
@@ -1076,7 +1088,7 @@ int runCompile(const ElfImage& img, const std::vector<Func>& funcs, const Compil
     const int rc = bbrSystem(opt.bundleDir, cmd);
     linkTime = since(t);
     if (rc != 0) { bbrError("link failed (%d): %s", rc, cmd.c_str()); return 1; }
-    FILE* f = fopen(opt.soPath.c_str(), "rb");
+    FILE* f = fopen(opt.codePath().c_str(), "rb");
     if (f) { fseek(f, 0, SEEK_END); soBytes = ftell(f); fclose(f); }
     bbrWork("link", 3, 3);
   }
@@ -1084,7 +1096,7 @@ int runCompile(const ElfImage& img, const std::vector<Func>& funcs, const Compil
   // The manifest: checks of the library against the one the manifest has, and the manifest of this build.
   std::string soSha; uint64_t soShaSize = 0;
   std::string manifestVerdict;
-  if (wantCode && !opt.soPath.empty() && (haveManifest || !opt.manifestOut.empty())) soSha = sha256OfFile(opt.soPath, &soShaSize);
+  if (wantCode && !opt.codePath().empty() && (haveManifest || !opt.manifestOut.empty())) soSha = sha256OfFile(opt.codePath(), &soShaSize);
   if (haveManifest && !man.soSha.empty() && !soSha.empty()) {
     bool allKnown = shardMismatch.empty();
     for (unsigned k = 0; k < nshards; ++k) allKnown = allKnown && manifestKnows[k];
@@ -1145,7 +1157,7 @@ int runCompile(const ElfImage& img, const std::vector<Func>& funcs, const Compil
   if (wantCode) {
     say("CPU time: lift+lower %.1f s, optimise %.1f s, codegen %.1f s (sum over threads); table %.1f s, x87 helpers %.1f s, link %.1f s\n", tot.liftLower, tot.opt, tot.codegen, tableTime, helperTime, linkTime);
     say(".text %.2f MB, objects %.2f MB%s\n", tot.textBytes / 1048576.0, tot.objBytes / 1048576.0, soBytes ? "" : "");
-    if (soBytes) say("%s: %.2f MB\n", opt.soPath.c_str(), soBytes / 1048576.0);
+    if (soBytes) say("%s: %.2f MB\n", opt.codePath().c_str(), soBytes / 1048576.0);
   } else {
     say("CPU time: lift+lower %.1f s\n", tot.liftLower);
   }

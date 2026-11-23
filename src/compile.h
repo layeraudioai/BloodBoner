@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Whole-image (or partial) compilation: lift -> lower -> optimise -> object files, in parallel shards;
-// the unit table module; linking an Android .so with the NDK linker.
+// Whole-image (or partial) compilation: lift -> lower -> optimise -> object files in parallel shards;
+// combine into Android/PC shared objects or an experimental Horizon AArch64 ET_REL bundle.
 #pragma once
 #include "codegen.h"
 #include "lifter.h"
@@ -23,7 +23,10 @@ struct CompileOptions {
   int64_t onlyVaddr = -1;        // only the function containing this vaddr
   std::string objPath;           // --obj: object files (<base>.NNN.o per shard, <base>.table.o)
   std::string llPath;            // --emit-ll: textual IR (<base>.NNN.ll per shard when shards > 1)
-  std::string soPath;            // --so: link an Android ARM64 shared object
+  std::string soPath;            // --so: Android ARM64 shared object or PC shared object
+  std::string horizonPath;       // --horizon-elf: relocatable AArch64 ELF for a future Horizon loader
+  std::string horizonClang = "clang", horizonLld = "ld.lld", horizonSysroot;
+  std::string codePath() const { return horizonPath.empty() ? soPath : horizonPath; }
   std::string statsPath;         // where the summary is also written
   std::string ndk = getenv("BB_NDK") ? getenv("BB_NDK") : std::string(BBR_HELPERS_DIR) + "/../.local-deps/android/ndk/android-ndk-r29"; // Android NDK r29 (./fetch-ndk.sh), for --so
   std::string bundleDir;         // self-contained build: bundle directory (bundle.h); empty: the NDK and the system clang
