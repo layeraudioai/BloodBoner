@@ -10,7 +10,7 @@ endif
 TARGET_PROFILE ?= switch1
 TARGET      := bloodboner-bootstrap-$(TARGET_PROFILE)
 BUILD       := build/$(TARGET_PROFILE)
-SOURCES     := source
+SOURCES     := source runtime platform
 DATA        :=
 INCLUDES    :=
 

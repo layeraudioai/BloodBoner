@@ -1,18 +1,22 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # Horizon runtime bring-up status
 
-This directory contains the shared AOT C ABI declarations (`bbr_runtime_abi.h`) and a small libnx dual-mapped JIT memory adapter (`jit_code_memory_nx.c`). It is **not** an ELF loader or guest CPU runtime. The adapter uses libnx `jitCreate`/`jitTransitionToExecutable`/`jitClose`, which select the available CodeMemory or supported process-memory mechanism and fail if JIT is unavailable; it preserves separate RW and RX views and delegates cache maintenance to libnx. Keeping the distinction explicit prevents an experimental `aarch64-none-elf` ET_REL file from being mistaken for runnable code.
+The surrounding `switch/platform/` layer maps Npad to a portable snapshot and to a tested subset of the Android port's PS4 PadData service (read/open/close/info and rumble callback). The NRO initializes this bridge, but the AOT guest import resolver does not route `scePad*` symbols to it; it is not yet game control integration.
 
-## Runtime contract carried forward
+This directory now has three distinct pieces:
 
-The compiler emits one function per unit: `void bbr_<guest-vaddr>(GuestState*)`. The table module exports sorted `bbr_units[]`, image-relative addresses and unit metadata, ABI version 2, and a writable `bbr_image_base`. The lowered code imports the helpers declared in `bbr_runtime_abi.h`. The authoritative semantics are in [`../../docs/RECOMP_ABI.md`](../../docs/RECOMP_ABI.md).
+- `guest_state.h` mirrors the Android port's AOT `GuestState` layout, with compile-time offsets/size checks and a reset routine. Its layout is pinned to `docs/RECOMP_ABI.md` and the Android source's `cpu/guest_state.h`; keep those in sync.
+- `bbr_runtime.c` provides a small, single-threaded prototype dispatcher for a table of already-linked `bbr_units`. It checks sorted-table invariants, bounds-checks guest addresses, dispatches exact unit entries, respects the dirty-byte array, and reports unsupported paths through a fault callback. The C ABI helper names are present so a synthetic linked unit can exercise dispatch.
+- `jit_code_memory_nx.c` is a libnx dual-mapped JIT-memory adapter using the libnx JIT API. It is a memory primitive only, not a loader.
 
-The Android runtime is not in this checkout. Before a Horizon runtime can execute anything, the port must implement and test:
+This is **not a game runtime**. The dispatcher deliberately faults closed for dirty code (no x86 fallback CPU), guest traps, syscalls, CPUID/TSC/XGETBV and FP-rounding imports. The helper stubs do not implement PS4/Linux semantics and must not be treated as successful emulation. The current NRO does not bind an AOT table or call the dispatcher.
 
-1. The exact `GuestState` layout, AArch64 host-call convention, guest x86 register/flags state, and version checks.
-2. A loader for the actual `ld.lld -r` ELF output, including section placement, all emitted AArch64 relocations, undefined-symbol resolution, unwind/exception policy, and bounds checking.
-3. A Horizon-approved executable-memory strategy. Do not assume RWX heap is allowed: choose the supported NRO/NSO/module or JIT mapping route for each target, enforce W^X, and flush the instruction cache after relocation.
-4. Image and linked-module mapping, PS4 syscall/service shims, guest faults/signals, dirty units, fallback CPU coverage, thread/TLS and guest host-call marshalling.
-5. GPU, audio, input, storage, save and window/surface integration. A CPU AOT unit is not a game runtime by itself.
+## Still required before game execution
 
-The current NRO only validates file hashes; it does not use the JIT adapter, map an AOT object, resolve imports, or execute cache output. `bbr_runtime_abi.h` is declaration-only and must not be linked as though it supplied the imports. The adapter's lifecycle is host-tested with a libnx mock, but not compiled against devkitPro or run on hardware. Next runtime gate: connect an ET_REL loader to the RW/RX allocator, support every relocation emitted by the compiler, implement all imports and image mapping, then test a synthetic function on Switch 1 and repeat on Switch 2.
+1. A Horizon loader for the actual `ld.lld -r` ELF output: safe section placement, bounds/alignment checks, every emitted AArch64 relocation, undefined-symbol resolution, unwind policy, and relocation tests.
+2. A runtime ABI verifier for ABI version, image hash, metadata and table consistency, plus a safe executable-memory route per Switch target. W^X and instruction-cache rules must be verified on hardware.
+3. Guest image and module mapping, import resolution, PS4 service shims, syscall/thread/TLS support, exception/fault behavior, dirty-code fallback, and guest host-call marshalling.
+4. Graphics and audio translation/backends, filesystem/save integration, and title lifecycle. Input still only controls the bootstrap screen; there is no Bloodborne gameplay input adapter.
+5. A full synthetic runtime test and then real Switch 1/2 hardware validation. Switch 2 support is not established by the profile label or a Switch 1 build.
+
+The host tests compile the guest-state layout and dispatcher against synthetic function tables. They do not validate the libnx JIT API, ELF loading, guest services, graphics/audio, or game boot. `bbr_runtime_abi.h` describes interfaces; it is not a substitute for the above systems.

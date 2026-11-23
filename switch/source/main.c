@@ -5,6 +5,9 @@
 #include <stdio.h>
 
 #include "cache_consumer.h"
+#include "pkg_probe.h"
+#include "../platform/horizon_input.h"
+#include "../platform/horizon_pad.h"
 
 #ifndef BBR_SWITCH_TARGET
 #ifdef BBR_SWITCH_TARGET_SWITCH2
@@ -15,9 +18,20 @@
 #endif
 
 #define BBR_CACHE_ROOT "sdmc:/switch/bloodboner/cache/active"
+#define BBR_PKG_INBOX "sdmc:/switch/bloodboner/incoming"
+
+static const char *pkg_status_text(BbPkgProbeStatus status) {
+    switch (status) {
+    case BBR_PKG_PROBE_HEADER_FOUND: return "PKG header found (not extracted)";
+    case BBR_PKG_PROBE_BAD_MAGIC: return ".pkg found, header not recognized";
+    case BBR_PKG_PROBE_ERROR: return "scan failed";
+    default: return "no .pkg found";
+    }
+}
 
 static void draw_screen(bool details, bool sd_mounted, bool cache_ok,
-                        const BbCacheInfo *cache, const char *cache_error) {
+                        const BbCacheInfo *cache, const char *cache_error,
+                        const BbPkgProbe *pkg) {
     consoleClear();
     printf("BloodBoner — Horizon bootstrap\n");
     printf("================================\n\n");
@@ -31,6 +45,14 @@ static void draw_screen(bool details, bool sd_mounted, bool cache_ok,
     }
 
     if (details) {
+        printf("\nPKG inbox:    %s\n", BBR_PKG_INBOX);
+        printf("PKG scan:     %s\n", pkg_status_text(pkg->status));
+        if (pkg->status == BBR_PKG_PROBE_HEADER_FOUND || pkg->status == BBR_PKG_PROBE_BAD_MAGIC) {
+            printf("Candidate:    %.68s\n", pkg->path);
+            printf("Size:         %llu bytes\n", (unsigned long long)pkg->size);
+            if (pkg->status == BBR_PKG_PROBE_HEADER_FOUND)
+                printf("Detection only; this NRO cannot extract it.\n");
+        }
         printf("\nExpected cache directory:\n%s\n", BBR_CACHE_ROOT);
         if (cache_ok) {
             printf("Target:       %s\n", cache->target);
@@ -54,15 +76,16 @@ int main(int argc, char **argv) {
     (void)argv;
 
     consoleInit(NULL);
-    padConfigureInput(1, HidNpadStyleSet_NpadStandard);
-    PadState pad;
-    padInitializeDefault(&pad);
+    bbr_horizon_pad_init(NULL, NULL);
+    BbrInputState input = {0};
 
     const Result mount_result = fsdevMountSdmc();
     const bool sd_mounted = R_SUCCEEDED(mount_result);
     BbCacheInfo cache = {0};
+    BbPkgProbe pkg = {0};
     char cache_error[256] = "SD card mount failed";
     if (sd_mounted) {
+        bb_pkg_probe(BBR_PKG_INBOX, &pkg);
         consoleClear();
         printf("BloodBoner cache check\n");
         printf("Reading and hashing cache files...\n");
@@ -72,15 +95,14 @@ int main(int argc, char **argv) {
         bb_cache_verify(BBR_CACHE_ROOT, BBR_SWITCH_TARGET, &cache,
                         cache_error, sizeof cache_error) == 0;
     bool details = false;
-    draw_screen(details, sd_mounted, cache_ok, &cache, cache_error);
+    draw_screen(details, sd_mounted, cache_ok, &cache, cache_error, &pkg);
 
     while (appletMainLoop()) {
-        padUpdate(&pad);
-        const u64 down = padGetButtonsDown(&pad);
-        if (down & HidNpadButton_Plus) break;
-        if (down & HidNpadButton_A) {
+        bbr_horizon_input_poll(&input);
+        if (input.pressed & BBR_INPUT_PLUS) break;
+        if (input.pressed & BBR_INPUT_A) {
             details = !details;
-            draw_screen(details, sd_mounted, cache_ok, &cache, cache_error);
+            draw_screen(details, sd_mounted, cache_ok, &cache, cache_error, &pkg);
         }
         consoleUpdate(NULL);
     }
