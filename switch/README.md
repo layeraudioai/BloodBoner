@@ -45,9 +45,23 @@ python3 switch/cache_manifest.py verify --root out/cache --target switch1 \
 
 After sealing, `publish` copies only manifest-listed outputs, verifies them again, writes completion metadata last, and exposes the completed directory with a same-filesystem atomic rename. Transfers resume from verified per-file prefixes after interruption; a damaged prefix is discarded and recopied. It refuses to overwrite an existing destination. To prepare the NRO's default path directly, use `python3 switch/cache_manifest.py publish --root out/cache --destination /media/sd/switch/bloodboner/cache/active --target switch1`. If `active` already exists, choose a temporary destination, validate it, and arrange a safe replacement while the NRO is not running. This transports completed stages; it does not produce them.
 
-The AOT compiler can emit an experimental `aarch64-none-elf` ET_REL object bundle; details and the build command are in [`docs/HORIZON_AOT_EXPERIMENT.md`](../docs/HORIZON_AOT_EXPERIMENT.md). There is still no complete first-run builder: extracted game files, Horizon runtime-compatible AOT, and converted texture/audio stages are not yet produced as one usable cache. The NRO verifies cache files only and does not execute them.
+The AOT compiler can emit an experimental `aarch64-none-elf` ET_REL object bundle; details and the build command are in [`docs/HORIZON_AOT_EXPERIMENT.md`](../docs/HORIZON_AOT_EXPERIMENT.md). The runtime interface draft is [`switch/runtime/bbr_runtime_abi.h`](runtime/bbr_runtime_abi.h); [`jit_code_memory_nx.c`](runtime/jit_code_memory_nx.c) adds a libnx RW/RX JIT memory adapter. Neither supplies the ET_REL loader, guest CPU dispatcher, or game-service runtime yet.
 
-Run the host-side manifest tests with `python3 -m unittest discover -s switch -p 'test_*.py'`. The manifest helper uses Python 3.10+ and the standard library.
+An asset census is available for an already-extracted directory:
+
+```sh
+python3 switch/asset_inventory.py /path/to/extracted/game --out out/asset-inventory.json
+```
+
+For a narrow open-format subset, `asset_pipeline.py` produces `stages/textures` and `stages/audio`:
+
+```sh
+python3 switch/asset_pipeline.py /path/to/extracted/open-assets --out out/asset-stages --color-space srgb --astcenc astcenc
+```
+
+This requires Arm `astcenc`. PNG/JPEG images are encoded as single-level ASTC (default 4x4 blocks, `-thorough`); choose `--color-space linear` for linear data/normal maps, and do not mix color spaces in one invocation. PCM mono/stereo RIFF/WAVE files are copied unchanged to the audio stage. Unknown formats, compressed WAV and other file types fail closed rather than publishing incomplete stages. Keep original inputs in `game_files`; ASTC encoding is lossy. The stages are experimental and the NRO does not yet load them. This tool does not parse PKGs or decode Bloodborne's proprietary archives.
+
+The census recognizes a limited set of signatures (PNG/JPEG/DDS/KTX/ASTC, WAV/Ogg/FSB/CRI); extensions alone are not treated as format proof. There is still no complete first-run builder: extracted game files, Horizon-runtime-compatible AOT and all game texture/audio formats are not yet produced as one usable cache. The NRO verifies files only; it does not execute the AOT or load these assets. Run the host-side tests with `python3 -m unittest discover -s switch -p 'test_*.py'`. The host tools use Python 3.10+ and the standard library.
 
 ## Controls
 
